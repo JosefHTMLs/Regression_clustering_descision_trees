@@ -1,0 +1,555 @@
+---
+title: "Assignment 4"
+author: "GROUP 10"
+output:
+  rmdformats::readthedown:
+    self_contained: TRUE
+    thumbnails: TRUE
+    lightbox: TRUE
+    gallery: FALSE
+    highlight: tango
+    css: custom.css
+---
+
+
+
+```{r setup, include=FALSE}
+library(knitr)
+library(rmdformats)
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(cluster)
+library(factoextra)
+library(forecast)
+library(ggcorrplot)
+library(reshape2)
+library(DT)
+library(tidymodels)
+library(caret)
+library(plotly)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+
+
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=TRUE,
+	             cache=TRUE,
+               prompt=TRUE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+
+
+```
+
+
+# Loading bikeshare dataset
+
+  Below is a dataset regarding the hourly and daily count of rental bikes between 2011 and 2012 in the Capital bikeshare system which also includes the corresponding weather and seasonal information. 
+
+```{r}
+
+bike_share <- read_csv("dcbikeshare.csv")   # loading data
+
+bike_share
+
+
+```
+
+# Part 1. Regression Continued 
+
+## Question 1. (Fixing season column)
+
+  As we can see the data set provided has a column names season that consists of numerical variables from 1-4 that represent different seasons. Thanks to the metadata we can see what these variables represent and then we can replace them with the actual name of the season. 
+
+```{r}
+
+bike_share <- bike_share %>%
+  mutate(season = as.factor(recode(season, `1` = "winter", `2` = "spring", `3` = "summer", `4` = "fall"))) # transforming variables 
+
+View(bike_share)
+
+bike_share$season <- factor(bike_share$season, levels = c("spring", "summer", "fall", "winter")) #This sets spring as the baseline level (the first level))
+
+levels(bike_share$season)
+
+
+```
+
+
+## Question 2. (Fixing "holiday" and "working day" columns)
+
+  The columns named "holiday" and "working day" came formatted as 0's and 1's to represent either "no" or "yes". Once again, we refer to the metadata and see that holiday means weather the day is a holiday or not and working day means if the day is neither weekend nor holiday.
+
+  - 0 = "No"
+  - 1 = "Yes"
+  
+```{r}
+
+bike_share <- bike_share %>%
+  mutate(holiday = as.factor(recode(holiday, `0` = "no", `1` = "yes"))) %>%
+  mutate(workingday = as.factor(recode(workingday,  `0` = "no", `1` = "yes")))
+
+bike_share$holiday <- factor(bike_share$holiday, levels = c("no", "yes"))        # setting no as base line for both columns 
+bike_share$workingday <- factor(bike_share$workingday, levels = c("no", "yes"))
+
+
+bike_share %>%      
+  select(holiday, workingday)   # grabs only those 2 rows 
+
+```
+
+## Question 3. (Fixing "yr" column)
+
+  The "yr" column consists of 0's and 1's which represent if it's 2011 or 2012. So, let's go and change the 0's and 1's so our data set projects 2011 and 2012. 
+  
+```{r}
+
+bike_share <- bike_share %>%
+  mutate(yr = as.factor(recode(yr, `0` = "2011", `1` = "2012")))
+
+bike_share$yr <- factor(bike_share$yr, levels = c("2011", "2012"))   # 2011 as baseline
+
+bike_share %>%
+  select(yr)
+
+```
+
+## Question 4. (Fixing the weathersit column)
+
+  The Weathersit column is representing the weather by numerical variables, where 1 = clear, 2 = mist, 3 = light rain, and 4 = heavy rain. To those who might view the data without the metadata won't understand what these numerical variables represent so lets make this data set easier to understand. 
+
+```{r}
+
+bike_share <- bike_share %>%
+  mutate(weathersit = as.factor(recode(weathersit, `1` = "clear", `2` = "mist", `3` = "light precipitation", `4` = "heavy precipitation")))     # changing variables 
+
+
+bike_share$weathersit <- factor(bike_share$weathersit, levels = c("clear", "mist", "light precipitation", "heavy precipitation"))       # baseline
+
+bike_share %>%
+  select(weathersit)  # showing fix
+```
+
+
+## Question 5.   Linear model predicting the total bike rentals from daily temperature.
+
+### Splitting data for the model
+   
+```{r}
+
+set.seed(123)
+
+
+bike_split <- initial_split(bike_share, prop = 0.75) #Specifying that our training will have 75%, with the remaining going to testing (we do that below)
+
+
+bike_training <- training(bike_split)
+
+
+bike_testing <- testing(bike_split)
+
+bike_split  # shows 548 rows for training, 183 rows for testing and 731 for the total amount of rows in the data set.
+
+```
+
+
+### Now let's use the split we just did to build the model.
+
+
+```{r}
+
+training_lm_model <- lm(`cnt` ~ temp, data = bike_training) # Model 
+
+options(scipen = 999) # to avoid scientific notation 
+
+summary(training_lm_model) 
+```
+
+
+  - As we can see, temperature is a significant variable when it comes to the total number of sales daily, it appears to be that hotter days tend to do better than other types of days (which makes sense). Who would like to ride a bike on a rainy day? Also, we know is significance because of the "***" symbols within the coefficients section under temp where there is a decimal number with multiple 0's. Pr(>|t|) stands for the p-value (level of significance) of the variable.
+  
+### Plotting residuals
+
+  It is always good to also see a visual representation of your residuals in order to see if your model will overpredict or underpredict something. Keeping in mind a predictive model will never be 100 percent accurate, we have to make it so it predicts close enough for us to make decisions based on that narrowed estimate.
+  
+```{r}
+
+ggplot(data = training_lm_model) + 
+  aes(x = training_lm_model$residuals) +
+  geom_histogram(bins = 20, fill = "orange", color = "black") +
+  labs(title = "Training Residuals", x = "") 
+  
+
+
+```
+
+  - This is a good sign of our model. Residuals is the difference between actual observed data and what the model predicted. When you look at a histogram of the residuals of your module, you always want to make sure the distribution looks centered to 0 and not all over the place. A skewed distribution would suggest that the model overestimates or underestimates. So, it is a good thing that most of our errors seem to be close to 0. We do not want over and under estimation biases on our models. 
+  
+
+## Question 6.     Linear model predicting total daily bike rentals from other factors. Lets see how the other factors recorded increase daily bike rental sales. 
+
+```{r}
+
+bike_training1 <- bike_training %>%
+  select(cnt, season, yr,holiday, workingday, weathersit, temp, atemp, hum, windspeed)
+
+
+training_lm_model2 <- lm(`cnt` ~ ., data = bike_training1) #This one uses just Home_Age as a predictor
+
+
+
+summary(training_lm_model2)
+
+```
+
+ - In this linear model we can see that certain variables that should be very significant are not. For example, seasonsummer should be more significant considering people enjoy riding bycicles more under good weather and what better weather than summer. Also, we can see that atemp ("feeling temperature") is not a statistically significant variable, when in reality the feeling of what the temperature is like is a huge influence on daily bike rental sales. Note, this goes to show that by adding more variables we reduce the level of significance of other variables, so to prevent this we should always either start eliminating non-significant variables one by one or we can see what makes sense and try it out (next linear model).
+
+
+## Qiuestion 6 (cont.)  Linear model using atemp ("what the weather feels like") and holiday ("whether the day is a holiday or not").  
+ 
+```{r}
+
+training_lm_model3 <- lm(`cnt` ~ atemp + holiday, data = bike_training) #This one uses just Home_Age as a predictor
+
+
+
+summary(training_lm_model3)
+
+
+```
+
+  - Now we are talking. By reducing the number of variables that are not significant we can get to the bottom of very good predictors for what we are trying to predict. In this case we can see how atemp became significant (as they should) whereas, holiday became statistically insignificant in the previous model these variables were recorded the other way around. By using some sense and checking significance levels we can see the real predictors. Finally, the adjusted r-squared here is 0.383, which is lower than in the previous model and always a great sign telling us that the model got better. 
+
+
+# Part 2 - Clustering 
+
+## Loading Mall data 
+
+```{r}
+
+# Loading customer data
+
+customers <- read_csv("Mall_Customers(1).csv")
+
+View(customers)
+
+customers
+
+
+```
+
+## Question 1. Exploratory data analysis
+
+### Age distribution between males and females.  
+
+  Let's see who participated in this data set. Male or Female and age would be interesting to see.
+
+
+```{r}
+
+age_distribution_chart <- ggplot(customers) +
+ aes(x = Age, fill = Sex) +
+ geom_histogram(bins = 30L, color = "black") +
+ scale_fill_manual(values = c(Female = "#8e20c3", 
+Male = "#20abc3")) +
+ labs(x = "Age", y = "Count", title = "Age distribution between males and females", 
+ subtitle = "This is the age distribution of participants in this data set separated by gender") +
+ theme_minimal() +
+ theme(legend.position = "none") +
+ facet_wrap(vars(Sex))   # so we can see the 2 charts next to each other.
+
+ggplotly(age_distribution_chart)
+
+```
+
+
+  - We can see that this data set has more female than male contenders of which the highest count goes to female contenders with the age of 30 and for males the highest count was 20 year olds. Also, we can see that the average of participants are from 20- 50 year olds in both females and Males. 
+
+
+
+### Does age play a factor when it comes to annual salary?
+
+  let's see if the older you are the more you get paid. This is a normal assumption to make because the older a person gets the wiser that person might become. This could be with either experience or knowledge, hence seen as a better asset. 
+
+
+
+```{r}
+
+# Age's Impact on Annual Salary Graph
+
+ggplot(customers) +
+ aes(x = Age, y = `Annual Income (k$)`, fill = Sex) +
+ geom_col(color = "black") +
+ scale_fill_manual(values = c(Female = "#8e20c3", 
+Male = "#20abc3")) +
+ labs(x = "Age", 
+ y = "Annual Income ", title = "Relationship of Annual Income and Age ", subtitle = "This chart shows the relationship between age and annual income. Also, divided by gender.") +
+ theme_minimal() +
+ theme(legend.position = "none") +
+ facet_wrap(vars(Sex))
+
+
+
+
+```
+
+- Interesting enough we found that within this data set age doesn't seem to play a big role on income. It actually shows how individuals in their 30's have the highest spikes on annual income both in males and females. Also, we can see that the male's peak for highest annual salary is 500 thousand dollars whereas females have less than 500 thousand dollars. 
+
+
+### Age's role on spending?
+
+  Now, we will see if age is an important factor when it comes to more spending or less spending.
+  
+
+```{r}
+
+age_spending_chart <- customers %>%
+  ggplot(aes(x = Age, y = `Spending Score (1-100)`, fill = Sex)) +
+ geom_col(color = "black") +
+ scale_fill_manual(values = c(Female = "#8e20c3", 
+Male = "#20abc3")) +
+ labs(title = "Age's Role on Spending ") +
+ theme_minimal() + theme(legend.position = "none")
+
+ggplotly(age_spending_chart)
+
+```
+
+  - As we can see it seems that women tend to have more spending habits than man. This could be because of the data set we have contains more females than males or it could also be that woman tend to spend more. To better know, it's best if more data is taken into account. Also, we can see that the highest spending habits appear on 30-40's for both females and males after that section spending decreases. 
+  
+  
+## Question 2. Creating a clusters that look at both the annual income and spending score.
+
+### CLustering 
+
+
+```{r}
+
+set.seed(1)
+risk_cluster <- kmeans(customers[, 4:5], centers = 5)  # setting centers at 5 to see how good the clustering goes
+
+risk_cluster
+
+```
+
+ - Our clustering is not looking that good as we can see the "within cluster sum of squares by cluster:" is showing 75.4% which means that our clusters are successfully clustering 75.4 percent of the data correctly, but to find a more optimal clustering solution we can do a test which can guide us on how many clusters to use. 
+
+
+### The Elbow Test
+
+  The Elbow test is a great test to run in order to see the optimal number of clusters your data seems to need. 
+  
+  
+```{r}
+
+# elbow test 
+
+fviz_nbclust(customers[, 4:5], kmeans, method = "wss") 
+
+
+
+```
+
+ - According to the Elbow test we can deduce that the optimal number of cluster. 6 centers was the most viable amount of centers that we found maximized the total sum of squares since going from 5 to 6 clusters adds about 5% more towards the total sum of squares.The elbow graph shows 4 and 5 as the probable elbow point but 6 is where i would consider it to be the elbow point because from 6 centers onwards each extra center adds less which is shown on the graph as a small change in the line.
+
+
+### Fit that allows optimal number of clusters 
+  
+```{r}
+
+
+risk_cluster1 <- kmeans(customers[, 4:5],  centers = 6)  # specifying 6
+
+risk_cluster1
+
+```
+
+
+### Let's visualize it and see our results
+
+```{r}
+
+# added a new column to the data set 
+
+customers <- customers %>%
+  mutate(Cluster = as.character(risk_cluster1$cluster)) 
+
+# graph 
+
+ggplot() + 
+  geom_point(data = customers, mapping = aes(x = customers$`Annual Income (k$)`, y = customers$`Spending Score (1-100)`, color = customers$Cluster)) +
+  geom_point(mapping = aes(x = risk_cluster1$centers[,1], y = risk_cluster1$centers[,2]), color = "red", size = 5) +
+  labs(title = "Group Clusters", color = "Cluster Group")
+
+
+
+
+
+```
+
+- Using this K-means model the marketing and sales staff working for the mall are able to understand which groups or clusters of customers spend the most based on annual income. Visualizing our previous information showed us that based on the data, women had more spending habits then men. Both men and women earned highest while in their 30's and both men and women spent the most when in their 30-40's, that information combined with the k-means model shows which clusters have the highest spending score and looking at the graph customers with an annual income of around 70,000 had some of the highest spending scores in Cluster group 4. The marketing and sales staff should send targeted marketing to tap into that annual income bracket spending. 
+
+# Part 3 - Decision Trees 
+
+## Loading Titanic dataset 
+
+```{r}
+
+titanic <- read_csv("titanic.csv")
+
+View(titanic)
+
+titanic
+
+```
+
+
+
+## Fixing dataset
+
+- This data set contains a survived column that is recorded with 0s and 1s, 0s representing that the passenger didn't survive and 1 represents they did survive. Let's change it so it displays Yes and No.
+
+```{r}
+
+titanic <- titanic %>%
+  mutate(Survived = recode(Survived, "0" = "Did Not Survive", "1" = "Survived")) 
+
+titanic
+
+```
+
+
+## Awesome visual
+
+ let us see if the ticket class influenced who survived and who didn't in the titanic. 
+
+```{r}
+
+titanic %>%
+  ggplot(aes(x = Pclass, fill = Survived)) +         # to see distribution 
+  geom_bar(position = "dodge", color = "black")  + theme(panel.grid.major = element_line(colour = "red3"),
+    panel.background = element_rect(fill = "white",
+        colour = "black", size = 0.7, linetype = "solid"),
+    plot.background = element_rect(fill = "lemonchiffon2"),
+    legend.background = element_rect(colour = "black",
+        size = 0.4, linetype = "solid")) +
+  labs(x = "Ticket Class", y = "Count", 
+ title = "Passangers Ticket Class Separated by Survival") +
+  labs(caption = "Awesome visual brought to you by our amzing team") 
+ 
+
+
+```
+
+- This visual is showing the 3 ticket classes the Titanic had and the count of passengers in each. Also, I added "fill" equal to survived so that I could identify those who survived from those who didn't. As we can see, first class had the most survives and third class had the most casualties. This makes sense because first class passengers usually tend to be better located in any vehicle or craft, which leads to them to be able to get to safety with more easy than those who are in lower classes. In the case of the titanic, I think third class was located in the bottom of the ship which got sunk underwater first. 
+
+
+## Fixingh dataset for predicting “survival” of a passenger
+
+ - First, let's only select the columns we need.
+
+```{r}
+
+titanic_ds <- titanic %>%
+  select(-Name, -PassengerId, -Ticket) # minus sign inside select drops the columns 
+
+View(titanic_ds) 
+
+titanic_ds
+
+```
+
+
+## Splitting data
+
+```{r}
+
+set.seed(1) 
+
+split <- initial_split(titanic_ds, prop = 0.6) # 60% of our data will be used for training and 40 for training 
+
+
+split  # displayed on the bottom 
+
+
+training_data <- training(split) 
+
+validation_data <- testing(split) 
+
+
+nrow(training_data) #Shows you how many observations are in this data frame
+
+nrow(validation_data) #Shows you how many observations are in this data frame
+
+
+```
+
+- As we can see, 534 rows will be used for analysis, 357 will be used for validation, so new data that the model hasn't seen yet. This way we can see how our model will preform with "real data" which gives us a better idea of how it will preform in the real world. 
+
+## Model predicting “survival” of a passenger based on attributes
+
+```{r}
+
+survival_tree <- rpart(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Cabin + Embarked, data = titanic_ds, parms = list(split = "gini"), method = "class")
+
+prp(survival_tree, faclen = 0, varlen = 0, cex = 0.75, yesno = 2)
+
+```
+
+
+## Confusion Matrix 
+- Let's see how our model is doing at predicting. Is it better at predicting when people actually did not survive or if is it better at predicting if a passenger actually survive. By doing a confusion matrix we can see all this and more.
+
+
+```{r}
+
+prediction_test <- predict(survival_tree, newdata = training_data, type = "class")
+prediction_test1 <- predict(survival_tree, newdata = validation_data, type = "class")
+
+options(scipen = 999)
+
+View(as.data.frame(prediction_test))
+
+confusionMatrix(prediction_test, as.factor(training_data$Survived))
+
+
+
+```
+
+- The confusion matrix has an accuracy of 84.46% when predicting a person didn't survive, the No information rate is 61.42% which means if someone guessed if a person survived or not they would be correct 61% of the time. The model accurately predicted that 305 people did not survive, the model correctly predicted if someone actually survived 146 times. The model incorrectly predicted someone survived 23 times, and it predicted 60 people survived when in fact they did not. Specificity was 0.70 the prediction using the training data, and for the prediction test using validation data it had a specificity of 0.79 which means that the model was not good for predicting if someone survived since it was basically the same as the no information rate. This model was better at predicting that someone would not survive than it was at predicting that someone would survive.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
